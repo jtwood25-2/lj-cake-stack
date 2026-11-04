@@ -6,14 +6,14 @@ Tap to drop each tier of the cake. Whatever hangs over the edge is sliced off. T
 drops in a row and the cake starts growing back. Every score on the leaderboard becomes a flag
 on the way up, so you watch yourself climb past the rest of the family.
 
-**Play:** https://jtwood25-2.github.io/lj-cake-stack/ (scores stay on each device until the
-Cloudflare copy below is live)
+**Play:** https://cake.laurenandjackson.workers.dev/ (shared leaderboard). The older address
+https://jtwood25-2.github.io/lj-cake-stack/ is on the Minted site and forwards there.
 
 ## How it is built
 
 ```mermaid
 flowchart LR
-    src[game.html<br/>single source] -->|build.py| gh[index.html<br/>GitHub Pages, no server]
+    src[game.html<br/>single source] -->|build.py| gh[index.html<br/>GitHub Pages, forwards to the live game]
     src -->|build.py| pub[public/index.html<br/>API_BASE = /api]
     src -->|build.py extracts CORE| core[worker/core.js]
     pub --> cf[Cloudflare Worker]
@@ -92,7 +92,7 @@ npx wrangler d1 execute cake-stack --remote --file schema.sql
 npx wrangler secret put RUN_SECRET           # once each
 npx wrangler secret put ADMIN_PASSWORD
 npm run deploy
-BASE=https://cake.<subdomain>.workers.dev ADMIN_PASSWORD=... npm run smoke
+BASE=https://cake.laurenandjackson.workers.dev ADMIN_PASSWORD=... npm run smoke
 ```
 
 GitHub Pages serves `index.html` from `main` and updates about a minute after a push.

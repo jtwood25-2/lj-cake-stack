@@ -3,7 +3,7 @@
     python build.py
 
 Outputs (all generated; edit game.html, admin.html or worker/index.js instead):
-    index.html          GitHub Pages copy. No score server, so scores stay on each device.
+    index.html          GitHub Pages page. Forwards to the live game at LIVE_URL.
     public/index.html   Cloudflare copy. Talks to the score server at /api.
     public/admin.html   Score moderation page, served at /admin.
     worker/core.js      The game's scoring core, for the server to replay runs with.
@@ -33,6 +33,29 @@ HEAD = """<!doctype html>
 """
 TAIL = "\n</body>\n</html>\n"
 API_LINE = 'const API_BASE = "";'
+# The live game with the shared leaderboard. The GitHub Pages address (on the Minted site)
+# forwards here, keeping any ?query or #hash so shared links still work.
+LIVE_URL = "https://cake.laurenandjackson.workers.dev/"
+FORWARD = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Stack Lauren and Jackson's wedding cake as high as you can.">
+<meta property="og:title" content="Cake Stack · Lauren &amp; Jackson">
+<meta property="og:description" content="Stack the wedding cake as high as you can. Beat the family.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{LIVE_URL}">
+<link rel="canonical" href="{LIVE_URL}">
+<meta http-equiv="refresh" content="0; url={LIVE_URL}">
+<title>Cake Stack · Lauren &amp; Jackson</title>
+<script>location.replace("{LIVE_URL}" + location.search + location.hash);</script>
+</head>
+<body style="font-family:Georgia,serif;text-align:center;padding:3em 1em">
+<p>Taking you to the cake… <a href="{LIVE_URL}">Play Cake Stack</a></p>
+</body>
+</html>
+"""
 
 
 def fail(msg):
@@ -62,7 +85,7 @@ def main():
         p.write_text(text, encoding="utf-8")
         wrote[rel] = len(text)
 
-    put("index.html", HEAD + body + TAIL)
+    put("index.html", FORWARD)
     put("public/index.html", HEAD + body.replace(API_LINE, 'const API_BASE = "/api";') + TAIL)
     shutil.copyfile(here / "admin.html", here / "public/admin.html")
     wrote["public/admin.html"] = (here / "public/admin.html").stat().st_size

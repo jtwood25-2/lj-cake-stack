@@ -10,8 +10,8 @@
     {
       "binding": "DB",
       "database_name": "cake-stack",
-      // Placeholder for local testing. Replaced with the real id from `wrangler d1 create`.
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      // Created 2026-11-03 with `wrangler d1 create cake-stack`.
+      "database_id": "c5863298-daea-4dbd-b4a0-fc3a2ece0c07"
     }
   ],
   "observability": { "enabled": true }

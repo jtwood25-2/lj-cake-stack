@@ -1,0 +1,14 @@
+{
+  "name": "lj-cake-stack",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "python build.py",
+    "dev": "python build.py && wrangler dev --local",
+    "deploy": "python build.py && wrangler deploy",
+    "smoke": "node test/smoke.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.157.0"
+  }
+}

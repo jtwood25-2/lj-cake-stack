@@ -1,0 +1,18 @@
+{
+  // Deployed as https://cake.<your-subdomain>.workers.dev
+  "name": "cake",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-01",
+  // Static files (the game and the admin page) are served straight from ./public;
+  // anything not found there, including /api/*, reaches the worker.
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cake-stack",
+      // Placeholder for local testing. Replaced with the real id from `wrangler d1 create`.
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "observability": { "enabled": true }
+}

@@ -116,10 +116,10 @@ button.ghost{background:transparent;color:var(--frost);border-color:var(--line)}
 <script>
 (() => {
 "use strict";
-/* Shared leaderboard endpoint. Empty = scores stay on this device. */
-const LEADERBOARD_URL = "";
-/* Where "Challenge someone" sends people. */
-const PUBLIC_URL = "https://jtwood25-2.github.io/lj-cake-stack/";
+/* Score server path. build.py sets "/api" for the Cloudflare build; empty = scores stay on this device. */
+const API_BASE = "";
+/* Where "Challenge someone" sends people: this site when it has a score server, otherwise the public copy. */
+const PUBLIC_URL = API_BASE ? location.origin + "/" : "https://jtwood25-2.github.io/lj-cake-stack/";
 
 /* ===== CORE-BEGIN: pure and deterministic. A leaderboard server can re-run these
    exact functions over a run's tap times to compute the score itself. ===== */
@@ -278,8 +278,10 @@ function flash(id, text, ms) {
   clearTimeout(timers[id]); timers[id] = setTimeout(() => el.classList.remove("on"), ms);
 }
 
+let runToken = null;
 function start() {
   reset(false); state = "play"; startT = performance.now();
+  runToken = takeToken();
   rivals.forEach(r => r.passed = false);
   $("titlePanel").hidden = true; $("overPanel").hidden = true;
   $("score").hidden = false; $("score").textContent = "0";
@@ -292,7 +294,7 @@ function gameOver() {
   state = "over"; shake = reduced ? 0 : 10;
   tone(140, .45, "sawtooth", .10, .4); buzz([30, 40, 60]);
   $("rank").textContent = "";
-  last = { score: score(), secs: (performance.now() - startT) / 1000, taps: taps.slice() };
+  last = { score: score(), secs: (performance.now() - startT) / 1000, taps: taps.slice(), token: runToken };
   const prevBest = best, isBest = last.score > best;
   if (isBest) { best = last.score; store.set("best", best); }
   setTimeout(() => {
@@ -349,8 +351,24 @@ $("shareBtn").addEventListener("click", async () => {
 });
 
 /* ---------- leaderboard ---------- */
-const shared = !!LEADERBOARD_URL;
+const shared = !!API_BASE;
 let cachedTop = null;
+// Each run carries a one-time token from the server, fetched ahead of time so the token is
+// already older than the run when its score arrives (the server checks exactly that).
+let nextToken = null;
+async function prefetchToken() {
+  if (!shared) return null;
+  try { const j = await (await fetch(API_BASE + "/start", { method: "POST" })).json(); return j.token || null; }
+  catch { return null; }
+}
+const stockToken = () => prefetchToken().then(tok => { if (tok) nextToken = { token: tok, at: Date.now() }; });
+function takeToken() {
+  const t = nextToken && Date.now() - nextToken.at < 3600e3 ? nextToken.token : null;
+  nextToken = null;
+  if (shared && !t) prefetchToken().then(tok => { if (state === "play" && !runToken) runToken = tok; });
+  stockToken();
+  return t;
+}
 for (const id of ["boardTitle1", "boardTitle2"]) $(id).textContent = shared ? "Wedding leaderboard" : "Best on this device";
 
 function localTop() {
@@ -364,14 +382,15 @@ function localAdd(name, score) {
 }
 async function fetchTop() {
   if (!shared) return localTop();
-  const r = await fetch(LEADERBOARD_URL, { cache: "no-store" });
+  const r = await fetch(API_BASE + "/top", { cache: "no-store" });
   return (await r.json()).top || [];
 }
+// The server never takes a phone's word for the score: it replays the taps and scores the run itself.
 async function postScore(name, run) {
   if (!shared) { localAdd(name, run.score); return localTop(); }
-  // text/plain keeps this a "simple" request, so the server never has to answer a CORS preflight.
-  const r = await fetch(LEADERBOARD_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ name, score: run.score, secs: Math.round(run.secs), taps: run.taps }) });
+  if (!run.token) throw new Error("token");
+  const r = await fetch(API_BASE + "/score", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: run.token, name, taps: run.taps }) });
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || "rejected");
   return j.top || [];
@@ -405,9 +424,15 @@ async function submit(name) {
     renderBoard($("board2"), cachedTop, name);
     const rank = cachedTop.findIndex(s => String(s.name).toLowerCase() === name.toLowerCase());
     $("postNote").textContent = rank >= 0 ? `Posted as ${name}. You're #${rank + 1}.` : `Posted as ${name}.`;
-  } catch {
-    $("postBtn").disabled = false;
-    $("postNote").textContent = "Couldn't post that score. Check your connection and try again.";
+  } catch (e) {
+    const why = String(e && e.message);
+    const unverifiable = ["token", "used", "invalid", "time"].includes(why);
+    $("postBtn").disabled = unverifiable;
+    $("postNote").textContent =
+      why === "rate" ? "Lots of scores from this network right now. Try again in a minute." :
+      why === "name" ? "That name can't be used on the leaderboard. Try another." :
+      unverifiable ? "This run couldn't be verified, so it wasn't posted. The next one will be." :
+      "Couldn't post that score. Check your connection and try again.";
   }
 }
 $("postForm").addEventListener("submit", e => {
@@ -603,6 +628,7 @@ function frame(now) {
 
 state = "title"; reset(true);
 refreshBoard($("board1"));
+stockToken();
 requestAnimationFrame(frame);
 })();
 </script>

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Cake Stack Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,800&family=Figtree:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: one narrow column; sign-in, then a scrollable table of every player's best. */
+:root{
+  --bg:#121a2c; --card:#1a2440; --line:rgba(255,248,241,.14); --fg:#fff8f1; --muted:#aab2c5;
+  --gold:#e8c88a; --danger:#e89a8a;
+  --display:"Fraunces", Georgia, serif; --ui:"Figtree", "Segoe UI", system-ui, sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--ui)}
+main{max-width:720px;margin:0 auto;padding-block:32px;padding-inline:16px;display:grid;gap:20px}
+h1{margin:0;font-family:var(--display);font-weight:800;font-size:30px;line-height:1.1}
+.sub{color:var(--muted);font-size:14px}
+form{display:flex;gap:8px;flex-wrap:wrap}
+input{flex:1;min-width:0;font:600 15px var(--ui);color:var(--fg);background:rgba(255,248,241,.06);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+button{font:700 14px var(--ui);border-radius:9px;padding:9px 14px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--fg)}
+button.primary{background:var(--gold);color:#2a2113;border-color:transparent}
+button.danger{color:var(--danger);border-color:rgba(232,154,138,.4)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700}
+td.nm{white-space:normal;overflow-wrap:anywhere;min-width:120px}
+td.acts{display:flex;gap:6px;justify-content:flex-end}
+tr:last-child td{border-bottom:0}
+.note{min-height:1.2em;color:var(--muted);font-size:13px}
+h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>Cake Stack Admin</h1>
+    <div class="sub">Remove a score, or remove it and block the name from posting again.</div>
+  </div>
+
+  <form id="signIn">
+    <label for="pw" class="sub" style="flex-basis:100%">Admin password</label>
+    <input id="pw" type="password" autocomplete="current-password" required>
+    <button class="primary" type="submit">Sign in</button>
+  </form>
+
+  <section id="panel" hidden>
+    <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+      <h2 id="count">Scores</h2>
+      <button id="reload" type="button">Refresh</button>
+    </div>
+    <div class="note" id="note"></div>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Name</th><th>Best</th><th>When</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <h2 style="margin-top:24px">Blocked names</h2>
+    <div class="wrap"><table><tbody id="bannedRows"></tbody></table></div>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let pw = "";
+  try { pw = sessionStorage.getItem("cakeAdmin") || ""; } catch {}
+
+  async function call(path, body) {
+    const r = await fetch("/api/admin/" + path, {
+      method: body ? "POST" : "GET",
+      headers: { authorization: "Bearer " + pw, ...(body ? { "content-type": "application/json" } : {}) },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const j = await r.json();
+    if (r.status === 401) throw new Error("auth");
+    if (!j.ok) throw new Error(j.error || "failed");
+    return j;
+  }
+  const cell = (tr, text, cls) => { const td = document.createElement("td"); if (cls) td.className = cls; td.textContent = text; tr.append(td); return td; };
+  const btn = (label, cls, fn) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; if (cls) b.className = cls; b.addEventListener("click", fn); return b; };
+
+  async function load() {
+    $("note").textContent = "Loading…";
+    try {
+      const { scores, banned } = await call("scores");
+      try { sessionStorage.setItem("cakeAdmin", pw); } catch {}
+      $("signIn").hidden = true; $("panel").hidden = false;
+      $("count").textContent = `${scores.length} player${scores.length === 1 ? "" : "s"}`;
+      $("rows").replaceChildren();
+      scores.forEach((s, i) => {
+        const tr = document.createElement("tr");
+        cell(tr, i + 1); cell(tr, s.name, "nm"); cell(tr, s.score);
+        cell(tr, new Date(s.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }));
+        const acts = cell(tr, "", "acts");
+        acts.append(
+          btn("Remove", "", () => remove(s, false)),
+          btn("Remove and block", "danger", () => remove(s, true))
+        );
+        $("rows").append(tr);
+      });
+      if (!scores.length) { const tr = document.createElement("tr"); cell(tr, "No scores yet.", "nm").colSpan = 5; $("rows").append(tr); }
+      $("bannedRows").replaceChildren();
+      banned.forEach(b => {
+        const tr = document.createElement("tr");
+        cell(tr, b.name_key, "nm");
+        cell(tr, "", "acts").append(btn("Unblock", "", async () => { await call("unban", { name_key: b.name_key }); load(); }));
+        $("bannedRows").append(tr);
+      });
+      if (!banned.length) { const tr = document.createElement("tr"); cell(tr, "Nobody is blocked.", "nm"); $("bannedRows").append(tr); }
+      $("note").textContent = "";
+    } catch (e) {
+      if (e.message === "auth") {
+        try { sessionStorage.removeItem("cakeAdmin"); } catch {}
+        $("panel").hidden = true; $("signIn").hidden = false;
+        $("note").textContent = ""; if (pw) alertSignIn("That password didn't work.");
+      } else $("note").textContent = "Couldn't load scores. Check your connection and refresh.";
+    }
+  }
+  function alertSignIn(msg) {
+    let n = $("signInNote");
+    if (!n) { n = document.createElement("div"); n.id = "signInNote"; n.className = "note"; n.style.flexBasis = "100%"; $("signIn").append(n); }
+    n.textContent = msg;
+  }
+  // Two steps rather than a confirm() dialog, which the browser may suppress.
+  let armed = null;
+  async function remove(s, ban) {
+    const k = s.name_key + (ban ? ":ban" : "");
+    if (armed !== k) { armed = k; $("note").textContent = `Tap "${ban ? "Remove and block" : "Remove"}" again to ${ban ? "remove and block" : "remove"} ${s.name}.`; return; }
+    armed = null;
+    try { await call("remove", { name_key: s.name_key, ban }); await load(); $("note").textContent = `${ban ? "Removed and blocked" : "Removed"} ${s.name}.`; }
+    catch { $("note").textContent = "That didn't go through. Try again."; }
+  }
+  $("signIn").addEventListener("submit", e => { e.preventDefault(); pw = $("pw").value; load(); });
+  $("reload").addEventListener("click", load);
+  if (pw) load();
+})();
+</script>
+</body>
+</html>

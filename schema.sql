@@ -14,9 +14,18 @@ CREATE TABLE IF NOT EXISTS runs (
   ip_hash  TEXT NOT NULL,      -- keyed hash of the network address, never the address itself
   at       INTEGER NOT NULL,
   score    INTEGER NOT NULL,
-  name_key TEXT NOT NULL
+  name_key TEXT NOT NULL,
+  device   TEXT                -- keyed hash of the phone's device key (added 2026-11; see migrations/)
 );
 CREATE INDEX IF NOT EXISTS runs_ip_at ON runs (ip_hash, at);
+CREATE INDEX IF NOT EXISTS runs_name ON runs (name_key);
+
+-- claims: a name belongs to the first device that posted it, until released from the admin page.
+CREATE TABLE IF NOT EXISTS claims (
+  name_key TEXT PRIMARY KEY,
+  device   TEXT NOT NULL,      -- same keyed hash as runs.device
+  at       INTEGER NOT NULL
+);
 
 -- banned: names removed and blocked from the admin page.
 CREATE TABLE IF NOT EXISTS banned (

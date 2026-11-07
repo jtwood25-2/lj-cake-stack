@@ -1,5 +1,6 @@
 // Smoke test for the score server, including the cheating attempts it must refuse.
-// Runs against `wrangler dev` or the live site, and removes its own test player when done.
+// Runs against `wrangler dev` or the live site, and removes its own test players when done
+// (only with ADMIN_PASSWORD set; without it, two "Smoke Test" names stay on the board).
 //
 //   BASE=http://127.0.0.1:8787 ADMIN_PASSWORD=... node test/smoke.mjs
 import { replay } from "../worker/core.js";
@@ -7,6 +8,8 @@ import { replay } from "../worker/core.js";
 const BASE = (process.env.BASE || "http://127.0.0.1:8787").replace(/\/$/, "");
 const PW = process.env.ADMIN_PASSWORD || "";
 const NAME = `Smoke Test ${Date.now() % 100000}`;
+const DEVICE = "smoke-device-" + Math.random().toString(36).slice(2, 12);
+const OTHER = "smoke-other-" + Math.random().toString(36).slice(2, 12);
 let failures = 0;
 
 const check = (cond, label, got) => {
@@ -20,6 +23,7 @@ async function api(path, body, headers = {}) {
   try { j = await r.json(); } catch {}
   return { status: r.status, ...(j || {}) };
 }
+const post = (body, device = DEVICE) => api("/api/score", device === null ? body : { ...body, device });
 const token = async () => (await api("/api/start", {})).token;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const admin = PW ? { authorization: "Bearer " + PW } : {};
@@ -48,30 +52,39 @@ const run = findRun(2500, 6000);
 const tok = await token();
 check(typeof tok === "string" && tok.split(".").length === 3, "a run token is issued", tok);
 
-let r = await api("/api/score", { token: tok, name: NAME, taps: run.taps });
+let r = await post({ token: tok, name: NAME, taps: run.taps });
 check(r.error === "time", "refuses a run posted faster than it could have been played", r);
 
 const forged = tok.slice(0, -2) + (tok.endsWith("AA") ? "BB" : "AA");
-r = await api("/api/score", { token: forged, name: NAME, taps: run.taps });
+r = await post({ token: forged, name: NAME, taps: run.taps });
 check(r.error === "token", "refuses a forged token", r);
 
-r = await api("/api/score", { token: await token(), name: NAME, taps: [1336] });
+r = await post({ token: await token(), name: NAME, taps: [1336] });
 check(r.error === "invalid", "refuses a run that never ended in a miss", r);
 
-r = await api("/api/score", { token: await token(), name: "   ", taps: [250, 250] });
+r = await post({ token: await token(), name: "   ", taps: [250, 250] });
 check(r.error === "name", "refuses a blank name", r);
 
 await sleep(Math.max(0, run.played - 1000));
-r = await api("/api/score", { token: tok, name: NAME, taps: run.taps, score: 999 });
+r = await post({ token: tok, name: NAME, taps: run.taps, score: 999 });
 check(r.ok && r.score === run.score, `accepts a genuine run and scores it by replay (${run.score}), ignoring the claimed 999`, r);
 check(r.ok && r.top.some(e => e.name === NAME && e.score === run.score), "the run appears on the leaderboard", r.top);
 
-r = await api("/api/score", { token: tok, name: NAME, taps: run.taps });
+r = await post({ token: tok, name: NAME, taps: run.taps });
 check(r.error === "used", "refuses the same run posted twice", r);
 
-r = await api("/api/score", { token: await token(), name: NAME, taps: [250, 250] });
+r = await post({ token: await token(), name: NAME, taps: [250, 250] });
 const entry = r.ok && r.top.find(e => e.name === NAME);
 check(r.ok && entry && entry.score === run.score, "a lower score never replaces a player's best", r);
+
+r = await post({ token: await token(), name: NAME, taps: [250, 250] }, null);
+check(r.error === "device", "refuses a score without a device key", r);
+
+const spare = await token();
+r = await post({ token: spare, name: NAME.toUpperCase(), taps: [250, 250] }, OTHER);
+check(r.error === "taken", "another phone can't post under a taken name, in any capitalisation", r);
+r = await post({ token: spare, name: NAME + " B", taps: [250, 250] }, OTHER);
+check(r.ok, "the refused run can still post under a different name", r);
 
 r = await api("/api/admin/scores", undefined, {});
 check(r.status === 401, "admin refuses a request without the password", r.status);
@@ -80,15 +93,29 @@ if (!PW) {
   console.log("SKIP  admin checks (set ADMIN_PASSWORD to run them)");
 } else {
   r = await api("/api/admin/scores", undefined, admin);
-  check(r.ok && r.scores.some(s => s.name === NAME), "admin lists the player", r);
+  const row = r.ok && r.scores.find(s => s.name === NAME);
+  check(!!row, "admin lists the player", r);
+  check(row && row.locked && /^[\w-]{4}$/.test(row.devices) && /^[\w-]{4}$/.test(row.networks),
+    "admin shows the name as locked, with one device tag and one network tag", row);
+  r = await api("/api/admin/release", { name_key: NAME.toLowerCase() }, admin);
+  check(r.ok, "admin releases the name", r);
+  r = await post({ token: await token(), name: NAME, taps: [250, 250] }, OTHER);
+  check(r.ok, "after release, a different phone can claim the name", r);
+  r = await post({ token: await token(), name: NAME, taps: [250, 250] });
+  check(r.error === "taken", "and the first phone no longer can", r);
   r = await api("/api/admin/remove", { name_key: NAME.toLowerCase(), ban: true }, admin);
   check(r.ok, "admin removes and blocks a name", r);
-  r = await api("/api/score", { token: await token(), name: NAME, taps: [250, 250] });
+  r = await post({ token: await token(), name: NAME, taps: [250, 250] });
   check(r.error === "name", "a blocked name can't post again", r);
   r = await api("/api/admin/unban", { name_key: NAME.toLowerCase() }, admin);
+  for (const n of [NAME, NAME + " B"]) {
+    await api("/api/admin/remove", { name_key: n.toLowerCase(), ban: false }, admin);
+    await api("/api/admin/release", { name_key: n.toLowerCase() }, admin);
+  }
   const after = await api("/api/admin/scores", undefined, admin);
-  check(r.ok && !after.banned.some(b => b.name_key === NAME.toLowerCase()) && !after.scores.some(s => s.name === NAME),
-    "cleanup: test player removed and unblocked", after);
+  check(r.ok && !after.banned.some(b => b.name_key === NAME.toLowerCase()) &&
+    !after.scores.some(s => s.name === NAME || s.name === NAME + " B"),
+    "cleanup: test players removed, released and unblocked", after);
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");

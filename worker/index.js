@@ -9,6 +9,8 @@ const TOKEN_MAX_AGE_MS = 6 * 3600_000;
 const CLOCK_SLACK_MS = 1500;          // network latency between fetching a token and starting play
 const RATE_WINDOW_MS = 3600_000;
 const RATE_MAX = 120;                 // per network per hour: a whole reception can share one wifi
+const DEVICE_RE = /^[A-Za-z0-9_-]{16,64}$/;
+const TAG_LEN = 4;                    // characters of a device or network hash shown on the admin page
 
 const enc = new TextEncoder();
 const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -63,15 +65,27 @@ async function score(req, env) {
   const run = replay(taps);
   if (!run.over || run.score < 1) return fail("invalid");
 
+  // Each phone keeps a random device key. It is stored only as a keyed hash: the admin page
+  // shows its first characters as a device tag, and a name belongs to the first device to post it.
+  const device = String(body.device ?? "");
+  if (!DEVICE_RE.test(device)) return fail("device");
+  const dev = (await hmac(env.RUN_SECRET, "dev:" + device)).slice(0, 22);
+
   if (await env.DB.prepare("SELECT 1 FROM banned WHERE name_key = ?").bind(key).first()) return fail("name");
 
   const ip = (await hmac(env.RUN_SECRET, "ip:" + (req.headers.get("CF-Connecting-IP") || "unknown"))).slice(0, 22);
   const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM runs WHERE ip_hash = ? AND at > ?").bind(ip, now - RATE_WINDOW_MS).first();
   if (recent.n >= RATE_MAX) return fail("rate", 429);
 
+  // Claim the name for this device if nobody has it, then check who owns it. Checked before the
+  // run is recorded, so a player told the name is taken can post the same run under another name.
+  await env.DB.prepare("INSERT OR IGNORE INTO claims (name_key, device, at) VALUES (?, ?, ?)").bind(key, dev, now).run();
+  const owner = await env.DB.prepare("SELECT device FROM claims WHERE name_key = ?").bind(key).first();
+  if (!owner || !same(owner.device, dev)) return fail("taken", 409);
+
   try {
-    await env.DB.prepare("INSERT INTO runs (run_id, ip_hash, at, score, name_key) VALUES (?, ?, ?, ?, ?)")
-      .bind(id, ip, now, run.score, key).run();
+    await env.DB.prepare("INSERT INTO runs (run_id, ip_hash, at, score, name_key, device) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(id, ip, now, run.score, key, dev).run();
   } catch (e) {
     if (/UNIQUE/i.test(String(e))) return fail("used", 409);
     throw e;
@@ -90,9 +104,22 @@ async function admin(req, env, path) {
   if (!env.ADMIN_PASSWORD || !same(auth, "Bearer " + env.ADMIN_PASSWORD)) return fail("auth", 401);
 
   if (path === "/api/admin/scores" && req.method === "GET") {
-    const scores = (await env.DB.prepare("SELECT name_key, name, score, at FROM best ORDER BY score DESC, at ASC LIMIT 1000").all()).results;
+    // Device and network tags: every distinct one this name has posted from, newest runs included.
+    const scores = (await env.DB.prepare(
+      `SELECT b.name_key, b.name, b.score, b.at,
+         (SELECT group_concat(DISTINCT substr(r.device, 1, ${TAG_LEN})) FROM runs r WHERE r.name_key = b.name_key) AS devices,
+         (SELECT group_concat(DISTINCT substr(r.ip_hash, 1, ${TAG_LEN})) FROM runs r WHERE r.name_key = b.name_key) AS networks,
+         EXISTS (SELECT 1 FROM claims c WHERE c.name_key = b.name_key) AS locked
+       FROM best b ORDER BY b.score DESC, b.at ASC LIMIT 1000`).all()).results;
     const banned = (await env.DB.prepare("SELECT name_key, at FROM banned ORDER BY at DESC").all()).results;
     return json({ ok: true, scores, banned });
+  }
+  if (path === "/api/admin/release" && req.method === "POST") {
+    const { name_key } = await req.json();
+    const key = String(name_key ?? "").toLowerCase();
+    if (!key) return fail("invalid");
+    await env.DB.prepare("DELETE FROM claims WHERE name_key = ?").bind(key).run();
+    return json({ ok: true });
   }
   if (path === "/api/admin/remove" && req.method === "POST") {
     const { name_key, ban } = await req.json();

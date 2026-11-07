@@ -372,12 +372,23 @@ async function fetchTop() {
   const r = await fetch(API_BASE + "/top", { cache: "no-store" });
   return (await r.json()).top || [];
 }
+// A random key that stays on this phone. The first phone to post a name owns it, so nobody
+// else can post scores under that name.
+function deviceKey() {
+  let k = store.get("device", "");
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(k)) {
+    const b = crypto.getRandomValues(new Uint8Array(18));
+    k = btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_");
+    store.set("device", k);
+  }
+  return k;
+}
 // The server never takes a phone's word for the score: it replays the taps and scores the run itself.
 async function postScore(name, run) {
   if (!shared) { localAdd(name, run.score); return localTop(); }
   if (!run.token) throw new Error("token");
   const r = await fetch(API_BASE + "/score", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token: run.token, name, taps: run.taps }) });
+    body: JSON.stringify({ token: run.token, name, taps: run.taps, device: deviceKey() }) });
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || "rejected");
   return j.top || [];
@@ -418,8 +429,10 @@ async function submit(name) {
     $("postNote").textContent =
       why === "rate" ? "Lots of scores from this network right now. Try again in a minute." :
       why === "name" ? "That name can't be used on the leaderboard. Try another." :
+      why === "taken" ? `Someone else is already playing as ${name}. Add your last initial and post again.` :
       unverifiable ? "This run couldn't be verified, so it wasn't posted. The next one will be." :
       "Couldn't post that score. Check your connection and try again.";
+    if (why === "taken") $("nameIn").focus();
   }
 }
 $("postForm").addEventListener("submit", e => {

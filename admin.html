@@ -34,6 +34,7 @@ th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);whit
 th{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700}
 td.nm{white-space:normal;overflow-wrap:anywhere;min-width:120px}
 td.acts{display:flex;gap:6px;justify-content:flex-end}
+td.tag{white-space:pre;color:var(--muted);font-size:13px}
 tr:last-child td{border-bottom:0}
 .note{min-height:1.2em;color:var(--muted);font-size:13px}
 h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
@@ -44,6 +45,9 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
   <div>
     <h1>Cake Stack Admin</h1>
     <div class="sub">Remove a score, or remove it and block the name from posting again.</div>
+    <div class="sub">Each name is locked to the phone that first posted it. Release a name if its owner switched phones.
+      Device and network are short codes: the same code means the same phone, or the same internet connection.
+      Everyone on the venue wifi shares one network code.</div>
   </div>
 
   <form id="signIn">
@@ -59,7 +63,7 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
     </div>
     <div class="note" id="note"></div>
     <div class="wrap"><table>
-      <thead><tr><th>#</th><th>Name</th><th>Best</th><th>When</th><th></th></tr></thead>
+      <thead><tr><th>#</th><th>Name</th><th>Best</th><th>When</th><th>Device</th><th>Network</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
     <h2 style="margin-top:24px">Blocked names</h2>
@@ -98,14 +102,17 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
         const tr = document.createElement("tr");
         cell(tr, i + 1); cell(tr, s.name, "nm"); cell(tr, s.score);
         cell(tr, new Date(s.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }));
+        cell(tr, tags(s.devices, "Phone"), "tag");
+        cell(tr, tags(s.networks, "Net"), "tag");
         const acts = cell(tr, "", "acts");
+        if (s.locked) acts.append(btn("Release name", "", () => release(s)));
         acts.append(
           btn("Remove", "", () => remove(s, false)),
           btn("Remove and block", "danger", () => remove(s, true))
         );
         $("rows").append(tr);
       });
-      if (!scores.length) { const tr = document.createElement("tr"); cell(tr, "No scores yet.", "nm").colSpan = 5; $("rows").append(tr); }
+      if (!scores.length) { const tr = document.createElement("tr"); cell(tr, "No scores yet.", "nm").colSpan = 7; $("rows").append(tr); }
       $("bannedRows").replaceChildren();
       banned.forEach(b => {
         const tr = document.createElement("tr");
@@ -128,8 +135,18 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
     if (!n) { n = document.createElement("div"); n.id = "signInNote"; n.className = "note"; n.style.flexBasis = "100%"; $("signIn").append(n); }
     n.textContent = msg;
   }
+  // "ab12,cd34" from the server, one tag per line. Runs posted before tags existed have none.
+  const tags = (list, label) => list ? list.split(",").map(t => `${label} ${t}`).join("\n") : "–";
+
   // Two steps rather than a confirm() dialog, which the browser may suppress.
   let armed = null;
+  async function release(s) {
+    const k = s.name_key + ":release";
+    if (armed !== k) { armed = k; $("note").textContent = `Tap "Release name" again to let a different phone post as ${s.name}. Their score stays.`; return; }
+    armed = null;
+    try { await call("release", { name_key: s.name_key }); await load(); $("note").textContent = `Released ${s.name}. The next phone to post as ${s.name} will own it.`; }
+    catch { $("note").textContent = "That didn't go through. Try again."; }
+  }
   async function remove(s, ban) {
     const k = s.name_key + (ban ? ":ban" : "");
     if (armed !== k) { armed = k; $("note").textContent = `Tap "${ban ? "Remove and block" : "Remove"}" again to ${ban ? "remove and block" : "remove"} ${s.name}.`; return; }

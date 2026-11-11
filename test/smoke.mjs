@@ -24,6 +24,7 @@ async function api(path, body, headers = {}) {
   return { status: r.status, ...(j || {}) };
 }
 const post = (body, device = DEVICE) => api("/api/score", device === null ? body : { ...body, device });
+const played = (body, device = DEVICE) => api("/api/played", { ...body, device });
 const token = async () => (await api("/api/start", {})).token;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const admin = PW ? { authorization: "Bearer " + PW } : {};
@@ -65,6 +66,19 @@ check(r.error === "invalid", "refuses a run that never ended in a miss", r);
 r = await post({ token: await token(), name: "   ", taps: [250, 250] });
 check(r.error === "name", "refuses a blank name", r);
 
+// Attempts and time played: every finished run is reported, posted or not, and only admin sees them.
+const quick = await token();
+r = await played({ token: quick, taps: [250, 250] });
+check(r.ok, "records a finished run that was never posted", r);
+r = await played({ token: quick, taps: [250, 250] });
+check(r.error === "used", "counts the same run only once", r);
+r = await played({ token: forged, taps: [250, 250] });
+check(r.error === "token", "refuses a forged token for play time too", r);
+r = await played({ token: await token(), taps: [1336] });
+check(r.error === "invalid", "doesn't count a run that never ended", r);
+r = await api("/api/top");
+check(r.ok && r.top.every(e => Object.keys(e).sort().join() === "name,score"), "the public leaderboard shows only names and scores", r.top);
+
 await sleep(Math.max(0, run.played - 1000));
 r = await post({ token: tok, name: NAME, taps: run.taps, score: 999 });
 check(r.ok && r.score === run.score, `accepts a genuine run and scores it by replay (${run.score}), ignoring the claimed 999`, r);
@@ -72,6 +86,8 @@ check(r.ok && r.top.some(e => e.name === NAME && e.score === run.score), "the ru
 
 r = await post({ token: tok, name: NAME, taps: run.taps });
 check(r.error === "used", "refuses the same run posted twice", r);
+r = await played({ token: tok, taps: run.taps });
+check(r.ok, "the posted run is counted as an attempt too", r);
 
 r = await post({ token: await token(), name: NAME, taps: [250, 250] });
 const entry = r.ok && r.top.find(e => e.name === NAME);
@@ -97,6 +113,11 @@ if (!PW) {
   check(!!row, "admin lists the player", r);
   check(row && row.locked && /^[\w-]{4}$/.test(row.devices) && /^[\w-]{4}$/.test(row.networks),
     "admin shows the name as locked, with one device tag and one network tag", row);
+  // The unposted quick run moved under the name when this phone first posted; the low-score post
+  // has no play report (like a run from before plays were recorded), so it counts with no time.
+  check(row && row.attempts === 3 && row.played_ms === 500 + run.played,
+    `admin shows 3 attempts and ${500 + run.played} ms played`, row);
+  check(r.totals && r.totals.attempts >= 3 && r.totals.played_ms >= 500 + run.played, "admin shows wedding-wide totals", r.totals);
   r = await api("/api/admin/release", { name_key: NAME.toLowerCase() }, admin);
   check(r.ok, "admin releases the name", r);
   r = await post({ token: await token(), name: NAME, taps: [250, 250] }, OTHER);

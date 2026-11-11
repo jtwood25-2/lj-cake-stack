@@ -282,6 +282,7 @@ function gameOver() {
   tone(140, .45, "sawtooth", .10, .4); buzz([30, 40, 60]);
   $("rank").textContent = "";
   last = { score: score(), secs: (performance.now() - startT) / 1000, taps: taps.slice(), token: runToken };
+  reportPlay(last);
   const prevBest = best, isBest = last.score > best;
   if (isBest) { best = last.score; store.set("best", best); }
   setTimeout(() => {
@@ -382,6 +383,13 @@ function deviceKey() {
     store.set("device", k);
   }
   return k;
+}
+// Every finished run is reported, posted or not, so the admin page can count attempts and time
+// played. None of it is shown to players.
+function reportPlay(run) {
+  if (!shared || !run.token) return;
+  fetch(API_BASE + "/played", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: run.token, taps: run.taps, device: deviceKey() }) }).catch(() => {});
 }
 // The server never takes a phone's word for the score: it replays the taps and scores the run itself.
 async function postScore(name, run) {

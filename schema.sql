@@ -27,6 +27,21 @@ CREATE TABLE IF NOT EXISTS claims (
   at       INTEGER NOT NULL
 );
 
+-- plays: every finished run the game reports, posted or not. Admin-only: attempts and time played.
+-- name_key is the last name the phone posted under, or NULL until the phone posts one.
+CREATE TABLE IF NOT EXISTS plays (
+  run_id    TEXT PRIMARY KEY,  -- the token's id, as in runs; a run counts once
+  device    TEXT NOT NULL,     -- same keyed hash as runs.device
+  ip_hash   TEXT NOT NULL,
+  at        INTEGER NOT NULL,
+  score     INTEGER NOT NULL,
+  played_ms INTEGER NOT NULL,  -- sum of the tap times: active play, not menus
+  name_key  TEXT
+);
+CREATE INDEX IF NOT EXISTS plays_name ON plays (name_key);
+CREATE INDEX IF NOT EXISTS plays_device ON plays (device);
+CREATE INDEX IF NOT EXISTS plays_ip_at ON plays (ip_hash, at);
+
 -- banned: names removed and blocked from the admin page.
 CREATE TABLE IF NOT EXISTS banned (
   name_key TEXT PRIMARY KEY,

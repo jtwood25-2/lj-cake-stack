@@ -48,6 +48,8 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
     <div class="sub">Each name is locked to the phone that first posted it. Release a name if its owner switched phones.
       Device and network are short codes: the same code means the same phone, or the same internet connection.
       Everyone on the venue wifi shares one network code.</div>
+    <div class="sub">Attempts count every finished game, posted or not. Time played is time spent stacking, not
+      menus. Games from before 10 Nov 2026 count as attempts only if they were posted, and have no time.</div>
   </div>
 
   <form id="signIn">
@@ -61,9 +63,10 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
       <h2 id="count">Scores</h2>
       <button id="reload" type="button">Refresh</button>
     </div>
+    <div class="sub" id="totals"></div>
     <div class="note" id="note"></div>
     <div class="wrap"><table>
-      <thead><tr><th>#</th><th>Name</th><th>Best</th><th>When</th><th>Device</th><th>Network</th><th></th></tr></thead>
+      <thead><tr><th>#</th><th>Name</th><th>Best</th><th>Attempts</th><th>Time played</th><th>When</th><th>Device</th><th>Network</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
     <h2 style="margin-top:24px">Blocked names</h2>
@@ -93,14 +96,18 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
   async function load() {
     $("note").textContent = "Loading…";
     try {
-      const { scores, banned } = await call("scores");
+      const { scores, banned, totals } = await call("scores");
       try { sessionStorage.setItem("cakeAdmin", pw); } catch {}
       $("signIn").hidden = true; $("panel").hidden = false;
       $("count").textContent = `${scores.length} player${scores.length === 1 ? "" : "s"}`;
+      const t = totals || {};
+      $("totals").textContent = `Everyone: ${t.attempts || 0} attempts, ${dur(t.played_ms)} played.` +
+        (t.unnamed_attempts ? ` Not yet linked to a name: ${t.unnamed_attempts} attempts, ${dur(t.unnamed_ms)}, from ${t.unnamed_phones} phone${t.unnamed_phones === 1 ? "" : "s"}.` : "");
       $("rows").replaceChildren();
       scores.forEach((s, i) => {
         const tr = document.createElement("tr");
         cell(tr, i + 1); cell(tr, s.name, "nm"); cell(tr, s.score);
+        cell(tr, s.attempts); cell(tr, dur(s.played_ms));
         cell(tr, new Date(s.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }));
         cell(tr, tags(s.devices, "Phone"), "tag");
         cell(tr, tags(s.networks, "Net"), "tag");
@@ -112,7 +119,7 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
         );
         $("rows").append(tr);
       });
-      if (!scores.length) { const tr = document.createElement("tr"); cell(tr, "No scores yet.", "nm").colSpan = 7; $("rows").append(tr); }
+      if (!scores.length) { const tr = document.createElement("tr"); cell(tr, "No scores yet.", "nm").colSpan = 9; $("rows").append(tr); }
       $("bannedRows").replaceChildren();
       banned.forEach(b => {
         const tr = document.createElement("tr");
@@ -135,6 +142,12 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
     if (!n) { n = document.createElement("div"); n.id = "signInNote"; n.className = "note"; n.style.flexBasis = "100%"; $("signIn").append(n); }
     n.textContent = msg;
   }
+  const dur = ms => {
+    const m = Math.round((ms || 0) / 60000);
+    if (!ms) return "–";
+    if (m < 1) return "<1m";
+    return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+  };
   // "ab12,cd34" from the server, one tag per line. Runs posted before tags existed have none.
   const tags = (list, label) => list ? list.split(",").map(t => `${label} ${t}`).join("\n") : "–";
 

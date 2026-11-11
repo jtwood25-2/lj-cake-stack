@@ -24,9 +24,10 @@ flowchart LR
 | File | Role |
 |---|---|
 | `game.html` | The whole game. Page content only, no `<html>`/`<head>`, so it also works as the claude.ai preview. |
-| `admin.html` | Moderation page, served at `/admin`. Remove a score, or remove and block the name. |
+| `admin.html` | Moderation page, served at `/admin`. Remove a score, or remove and block the name. Also shows each player's attempts and time played. |
 | `worker/index.js` | Score server: issues run tokens, verifies and records scores, serves the static files. |
-| `schema.sql` | D1 tables. |
+| `schema.sql` | D1 tables, for a fresh database. |
+| `migrations/` | Changes to an existing database. Run each new one on the live database **before** deploying the code that needs it. |
 | `build.py` | Generates `index.html`, `public/`, and `worker/core.js`. All generated files are rebuilt on every deploy; never edit them. |
 | `test/smoke.mjs` | Checks every server rule, including the cheating attempts, against a local or live server. Removes its own test player. |
 
@@ -68,6 +69,18 @@ replays to the same score anywhere. The block between `CORE-BEGIN` and `CORE-END
 A bot that genuinely plays in real time is not stopped. Nothing free stops that, and nobody
 will build one for a wedding game.
 
+## Attempts and time played (admin only)
+
+When a game ends, the phone reports the run to `/api/played` whether or not the player posts it,
+using the same token and the same checks as a score. The server stores how long the run was
+(the sum of the tap times: time spent stacking, not menus) in `plays`. Nothing from `plays` is
+ever sent to players; only `/admin` shows it.
+
+A run is credited to the last name its phone posted under. A phone that hasn't posted yet keeps
+its runs unnamed, and they move under the name the first time it posts. Runs from before this
+was added (10 Nov 2026) count as attempts only if they were posted, and have no time. Removing
+a player from `/admin` also removes their attempts.
+
 The `best` table keeps one row per player, so each leaderboard load reads about 20 rows and
 stays far inside D1's free daily allowance.
 
@@ -91,6 +104,7 @@ npx wrangler d1 create cake-stack            # once; put the returned id in wran
 npx wrangler d1 execute cake-stack --remote --file schema.sql
 npx wrangler secret put RUN_SECRET           # once each
 npx wrangler secret put ADMIN_PASSWORD
+npx wrangler d1 execute cake-stack --remote --file migrations/<new>.sql   # each new migration, before deploying
 npm run deploy
 BASE=https://cake.laurenandjackson.workers.dev ADMIN_PASSWORD=... npm run smoke
 ```

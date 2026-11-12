@@ -148,7 +148,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem("ljcake:" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem("ljcake:" + k, JSON.stringify(v)); } catch {} }
 };
-const MILESTONES = [10, 25, 50, 75, 100, 150, 200];
+const MILESTONES = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
 const TOPPER_AT = 25;
 
 let W = 0, H = 0, DPR = 1, S = 1;

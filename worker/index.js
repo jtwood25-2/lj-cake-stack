@@ -66,7 +66,18 @@ async function verifyRun(req, env, body) {
   if (!DEVICE_RE.test(device)) return fail("device");
   const dev = (await hmac(env.RUN_SECRET, "dev:" + device)).slice(0, 22);
   const ip = (await hmac(env.RUN_SECRET, "ip:" + (req.headers.get("CF-Connecting-IP") || "unknown"))).slice(0, 22);
-  return { id, run, played, dev, ip, now };
+  return { id, run, played, dev, ip, now, place: placeOf(req) };
+}
+
+// Approximate city and region from Cloudflare's lookup of the network address, e.g. "Pittsburgh, PA".
+// Only this text is kept, never the address. Mobile data often resolves to the carrier's city.
+function placeOf(req) {
+  const cf = req.cf || {};
+  const clean = v => String(v ?? "").replace(/[\u0000-\u001f<>,]/g, "").trim().slice(0, 40);
+  const city = clean(cf.city), country = clean(cf.country);
+  const region = country === "US" ? clean(cf.regionCode) : clean(cf.region);
+  const parts = [city, region, country === "US" ? "" : country].filter(Boolean);
+  return parts.length ? parts.join(", ") : null;
 }
 
 async function score(req, env) {
@@ -79,7 +90,7 @@ async function score(req, env) {
 
   const v = await verifyRun(req, env, body);
   if (v instanceof Response) return v;
-  const { id, run, dev, ip, now } = v;
+  const { id, run, dev, ip, now, place } = v;
   if (run.score < 1) return fail("invalid");
 
   if (await env.DB.prepare("SELECT 1 FROM banned WHERE name_key = ?").bind(key).first()) return fail("name");
@@ -94,8 +105,8 @@ async function score(req, env) {
   if (!owner || !same(owner.device, dev)) return fail("taken", 409);
 
   try {
-    await env.DB.prepare("INSERT INTO runs (run_id, ip_hash, at, score, name_key, device) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(id, ip, now, run.score, key, dev).run();
+    await env.DB.prepare("INSERT INTO runs (run_id, ip_hash, at, score, name_key, device, place) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, ip, now, run.score, key, dev, place).run();
   } catch (e) {
     if (/UNIQUE/i.test(String(e))) return fail("used", 409);
     throw e;
@@ -120,18 +131,24 @@ async function played(req, env) {
   try { body = await req.json(); } catch { return fail("invalid"); }
   const v = await verifyRun(req, env, body);
   if (v instanceof Response) return v;
-  const { id, run, played, dev, ip, now } = v;
+  const { id, run, played, dev, ip, now, place } = v;
 
   const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM plays WHERE ip_hash = ? AND at > ?").bind(ip, now - RATE_WINDOW_MS).first();
   if (recent.n >= PLAY_RATE_MAX) return fail("rate", 429);
 
   const named = await env.DB.prepare("SELECT name_key FROM runs WHERE device = ? ORDER BY at DESC LIMIT 1").bind(dev).first();
   const res = await env.DB.prepare(
-    "INSERT OR IGNORE INTO plays (run_id, device, ip_hash, at, score, played_ms, name_key) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).bind(id, dev, ip, now, run.score, played, named ? named.name_key : null).run();
+    "INSERT OR IGNORE INTO plays (run_id, device, ip_hash, at, score, played_ms, name_key, place) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(id, dev, ip, now, run.score, played, named ? named.name_key : null, place).run();
   if (!res.meta.changes) return fail("used", 409);
   return json({ ok: true });
 }
+
+// Every game once: reported plays, plus posted runs that have no play report (older games), leaving
+// out removed players, the same way the totals do.
+const GAMES = `(SELECT name_key, place, device FROM plays
+  UNION ALL SELECT r.name_key, r.place, r.device FROM runs r WHERE r.name_key IN (SELECT name_key FROM best)
+    AND NOT EXISTS (SELECT 1 FROM plays p WHERE p.run_id = r.run_id))`;
 
 async function admin(req, env, path) {
   const auth = req.headers.get("authorization") || "";
@@ -148,7 +165,10 @@ async function admin(req, env, path) {
          (SELECT COALESCE(SUM(p.played_ms), 0) FROM plays p WHERE p.name_key = b.name_key) AS played_ms,
          (SELECT group_concat(DISTINCT substr(r.device, 1, ${TAG_LEN})) FROM runs r WHERE r.name_key = b.name_key) AS devices,
          (SELECT group_concat(DISTINCT substr(r.ip_hash, 1, ${TAG_LEN})) FROM runs r WHERE r.name_key = b.name_key) AS networks,
-         EXISTS (SELECT 1 FROM claims c WHERE c.name_key = b.name_key) AS locked
+         EXISTS (SELECT 1 FROM claims c WHERE c.name_key = b.name_key) AS locked,
+         (SELECT group_concat(place, '|') FROM (
+            SELECT g.place FROM ${GAMES} g WHERE g.name_key = b.name_key AND g.place IS NOT NULL
+            GROUP BY g.place ORDER BY COUNT(*) DESC)) AS places
        FROM best b ORDER BY b.score DESC, b.at ASC LIMIT 1000`).all()).results;
     const banned = (await env.DB.prepare("SELECT name_key, at FROM banned ORDER BY at DESC").all()).results;
     const totals = await env.DB.prepare(
@@ -162,7 +182,10 @@ async function admin(req, env, path) {
               (SELECT COUNT(*) FROM plays WHERE name_key IS NULL) AS unnamed_attempts,
               (SELECT COALESCE(SUM(played_ms), 0) FROM plays WHERE name_key IS NULL) AS unnamed_ms,
               (SELECT COUNT(DISTINCT device) FROM plays WHERE name_key IS NULL) AS unnamed_phones`).first();
-    return json({ ok: true, scores, banned, totals });
+    const places = (await env.DB.prepare(
+      `SELECT place, COUNT(*) AS attempts, COUNT(DISTINCT device) AS phones FROM ${GAMES}
+       WHERE place IS NOT NULL GROUP BY place ORDER BY attempts DESC LIMIT 10`).all()).results;
+    return json({ ok: true, scores, banned, totals, places });
   }
   if (path === "/api/admin/release" && req.method === "POST") {
     const { name_key } = await req.json();

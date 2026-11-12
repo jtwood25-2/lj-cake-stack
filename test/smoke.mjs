@@ -120,6 +120,10 @@ if (!PW) {
   check(r.totals && r.totals.attempts >= 3 && r.totals.played_ms >= 500 + run.played, "admin shows wedding-wide totals", r.totals);
   check(r.totals && Number.isInteger(r.totals.stacks) && r.totals.stacks >= run.score,
     "admin shows total tiers stacked across every game", r.totals);
+  check(row && typeof row.places === "string" && row.places.length > 0 && !/\d+\.\d+\.\d+\.\d+|:/.test(row.places),
+    "admin shows the player's approximate place, never an address", row && row.places);
+  check(Array.isArray(r.places) && r.places.some(p => row && row.places.split("|").includes(p.place) && p.attempts >= 1),
+    "admin lists top places", r.places);
   r = await api("/api/admin/release", { name_key: NAME.toLowerCase() }, admin);
   check(r.ok, "admin releases the name", r);
   r = await post({ token: await token(), name: NAME, taps: [250, 250] }, OTHER);

@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS runs (
   at       INTEGER NOT NULL,
   score    INTEGER NOT NULL,
   name_key TEXT NOT NULL,
-  device   TEXT                -- keyed hash of the phone's device key (added 2026-11; see migrations/)
+  device   TEXT,               -- keyed hash of the phone's device key (added 2026-11; see migrations/)
+  place    TEXT                -- approximate "City, Region" from the network, never the address
 );
 CREATE INDEX IF NOT EXISTS runs_ip_at ON runs (ip_hash, at);
 CREATE INDEX IF NOT EXISTS runs_name ON runs (name_key);
@@ -36,7 +37,8 @@ CREATE TABLE IF NOT EXISTS plays (
   at        INTEGER NOT NULL,
   score     INTEGER NOT NULL,
   played_ms INTEGER NOT NULL,  -- sum of the tap times: active play, not menus
-  name_key  TEXT
+  name_key  TEXT,
+  place     TEXT               -- as runs.place
 );
 CREATE INDEX IF NOT EXISTS plays_name ON plays (name_key);
 CREATE INDEX IF NOT EXISTS plays_device ON plays (device);

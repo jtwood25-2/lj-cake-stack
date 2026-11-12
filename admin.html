@@ -48,7 +48,7 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
     <div class="sub">Each name is locked to the phone that first posted it. Release a name if its owner switched phones.
       Device and network are short codes: the same code means the same phone, or the same internet connection.
       Everyone on the venue wifi shares one network code.</div>
-    <div class="sub">Attempts count every finished game, posted or not. Time played is time spent stacking, not
+    <div class="sub">Tiers stacked adds up every tier placed in every game. Attempts count every finished game, posted or not. Time played is time spent stacking, not
       menus. Games from before 10 Nov 2026 count as attempts only if they were posted, and have no time.</div>
   </div>
 
@@ -101,7 +101,7 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
       $("signIn").hidden = true; $("panel").hidden = false;
       $("count").textContent = `${scores.length} player${scores.length === 1 ? "" : "s"}`;
       const t = totals || {};
-      $("totals").textContent = `Everyone: ${t.attempts || 0} attempts, ${dur(t.played_ms)} played.` +
+      $("totals").textContent = `Everyone: ${(t.stacks || 0).toLocaleString()} tiers stacked across ${t.attempts || 0} attempts, ${dur(t.played_ms)} played.` +
         (t.unnamed_attempts ? ` Not yet linked to a name: ${t.unnamed_attempts} attempts, ${dur(t.unnamed_ms)}, from ${t.unnamed_phones} phone${t.unnamed_phones === 1 ? "" : "s"}.` : "");
       $("rows").replaceChildren();
       scores.forEach((s, i) => {

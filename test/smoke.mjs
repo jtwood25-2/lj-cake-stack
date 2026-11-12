@@ -118,6 +118,8 @@ if (!PW) {
   check(row && row.attempts === 3 && row.played_ms === 500 + run.played,
     `admin shows 3 attempts and ${500 + run.played} ms played`, row);
   check(r.totals && r.totals.attempts >= 3 && r.totals.played_ms >= 500 + run.played, "admin shows wedding-wide totals", r.totals);
+  check(r.totals && Number.isInteger(r.totals.stacks) && r.totals.stacks >= run.score,
+    "admin shows total tiers stacked across every game", r.totals);
   r = await api("/api/admin/release", { name_key: NAME.toLowerCase() }, admin);
   check(r.ok, "admin releases the name", r);
   r = await post({ token: await token(), name: NAME, taps: [250, 250] }, OTHER);

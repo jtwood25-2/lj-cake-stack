@@ -156,6 +156,9 @@ async function admin(req, env, path) {
                 + (SELECT COUNT(*) FROM runs r WHERE r.name_key IN (SELECT name_key FROM best)
                      AND NOT EXISTS (SELECT 1 FROM plays p WHERE p.run_id = r.run_id)) AS attempts,
               (SELECT COALESCE(SUM(played_ms), 0) FROM plays) AS played_ms,
+              (SELECT COALESCE(SUM(score), 0) FROM plays)
+                + (SELECT COALESCE(SUM(r.score), 0) FROM runs r WHERE r.name_key IN (SELECT name_key FROM best)
+                     AND NOT EXISTS (SELECT 1 FROM plays p WHERE p.run_id = r.run_id)) AS stacks,
               (SELECT COUNT(*) FROM plays WHERE name_key IS NULL) AS unnamed_attempts,
               (SELECT COALESCE(SUM(played_ms), 0) FROM plays WHERE name_key IS NULL) AS unnamed_ms,
               (SELECT COUNT(DISTINCT device) FROM plays WHERE name_key IS NULL) AS unnamed_phones`).first();

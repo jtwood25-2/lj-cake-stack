@@ -19,7 +19,7 @@
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--ui)}
-main{max-width:720px;margin:0 auto;padding-block:32px;padding-inline:16px;display:grid;gap:20px}
+main{max-width:1180px;margin:0 auto;padding-block:32px;padding-inline:16px;display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
 h1{margin:0;font-family:var(--display);font-weight:800;font-size:30px;line-height:1.1}
 .sub{color:var(--muted);font-size:14px}
 form{display:flex;gap:8px;flex-wrap:wrap}
@@ -35,6 +35,9 @@ th{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute
 td.nm{white-space:normal;overflow-wrap:anywhere;min-width:120px}
 td.acts{display:flex;gap:6px;justify-content:flex-end}
 td.tag{white-space:pre;color:var(--muted);font-size:13px}
+td.tag summary{cursor:pointer;color:var(--fg);font-weight:600}
+td.tag summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+td.tag details[open] summary{margin-bottom:4px}
 tr:last-child td{border-bottom:0}
 .note{min-height:1.2em;color:var(--muted);font-size:13px}
 h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
@@ -116,9 +119,9 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
         cell(tr, i + 1); cell(tr, s.name, "nm"); cell(tr, s.score);
         cell(tr, s.attempts); cell(tr, dur(s.played_ms));
         cell(tr, new Date(s.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }));
-        cell(tr, tags(s.devices, "Phone"), "tag");
-        cell(tr, tags(s.networks, "Net"), "tag");
-        cell(tr, s.places ? s.places.split("|").join("\n") : "–", "tag");
+        fold(cell(tr, "", "tag"), s.devices ? s.devices.split(",").map(t => "Phone " + t) : [], "phones");
+        fold(cell(tr, "", "tag"), s.networks ? s.networks.split(",").map(t => "Net " + t) : [], "networks");
+        fold(cell(tr, "", "tag"), s.places ? s.places.split("|") : [], "places");
         const acts = cell(tr, "", "acts");
         if (s.locked) acts.append(btn("Release name", "", () => release(s)));
         acts.append(
@@ -159,8 +162,15 @@ h2{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:v
     if (m < 1) return "<1m";
     return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
   };
-  // "ab12,cd34" from the server, one tag per line. Runs posted before tags existed have none.
-  const tags = (list, label) => list ? list.split(",").map(t => `${label} ${t}`).join("\n") : "–";
+  // One item shows as is; several collapse to a count ("3 networks") that opens the list on tap,
+  // so a player who moved around doesn't stretch their row. Runs from before tags existed have none.
+  function fold(td, items, plural) {
+    if (items.length < 2) { td.textContent = items[0] || "–"; return; }
+    const d = document.createElement("details"), sm = document.createElement("summary");
+    sm.textContent = `${items.length} ${plural}`;
+    d.append(sm, items.join("\n"));
+    td.append(d);
+  }
 
   // Two steps rather than a confirm() dialog, which the browser may suppress.
   let armed = null;
